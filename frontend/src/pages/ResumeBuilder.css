@@ -1,8 +1,6 @@
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+@import "tailwindcss";
+
+
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
@@ -671,6 +669,16 @@ body {
   border-bottom: 1px solid #000;
   padding-bottom: 5px;
   color: #000000;
+}
+
+.resume-section-title {
+  font-size: 14pt;
+  font-weight: bold;
+  margin-top: 18px;
+  margin-bottom: 8px;
+  color: #000000;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .preview-paper p {
