@@ -139,3 +139,5 @@ Task:
         "success": True,
         "latex": latex_code
     }, status=200)
+
+

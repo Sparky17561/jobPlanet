@@ -23,6 +23,7 @@ INSTALLED_APPS = [
     # YOUR APPS
     'resume',
     'coldconnect',
+    'users',
 ]
 
 MIDDLEWARE = [
@@ -84,3 +85,5 @@ TEMP_FOLDER = os.path.join(MEDIA_ROOT, "temp")
 os.makedirs(TEMP_FOLDER, exist_ok=True)
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+MONGO_URI = "mongodb://localhost:27017"
+MONGO_DB_NAME = "resume_db"

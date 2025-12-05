@@ -7,6 +7,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
 
     # All app routes here
+    path('user/', include('users.urls')),
     path('resume/', include('resume.urls')),
     path('coldconnect/', include('coldconnect.urls')),
 ]
