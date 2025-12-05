@@ -299,17 +299,21 @@ def resume_download(request, id):
 # 4) LATEX → PDF
 # GET /user/resume/pdf/<id>/
 # ============================================================
-
+import os
 import re
+import tempfile
+import subprocess
+from django.http import JsonResponse, FileResponse
+from django.conf import settings
+
 
 def clean_latex(text):
     """Remove characters that break pdflatex."""
-    text = text.replace("\u2013", "-")  # en dash
-    text = text.replace("\u2014", "-")  # em dash
-    text = text.replace("\u00A0", " ")  # non-breaking space
-    text = re.sub(r'[^\x00-\x7F]+', ' ', text)  # remove remaining unicode
+    text = text.replace("\u2013", "-")
+    text = text.replace("\u2014", "-")
+    text = text.replace("\u00A0", " ")
+    text = re.sub(r"[^\x00-\x7F]+", " ", text)  # remove all unicode
     return text
-
 
 def resume_pdf(request, id):
 
@@ -322,7 +326,6 @@ def resume_pdf(request, id):
     if not os.path.exists(tex_path):
         return JsonResponse({"error": "LaTeX file not found"}, status=404)
 
-    # Read & sanitize latex
     with open(tex_path, "r", encoding="utf-8") as f:
         latex_raw = f.read()
 
@@ -333,39 +336,46 @@ def resume_pdf(request, id):
         local_tex = os.path.join(tmp, "resume.tex")
         local_pdf = os.path.join(tmp, "resume.pdf")
 
-        # save cleaned latex
         with open(local_tex, "w", encoding="utf-8") as f:
             f.write(latex_cleaned)
 
-        # RUN PDFLATEX — CAPTURE LOGS
         try:
             result = subprocess.run(
-                ["pdflatex", "-interaction=nonstopmode", "resume.tex"],
+                ["pdflatex", "-interaction=nonstopmode", "-halt-on-error", "resume.tex"],
                 cwd=tmp,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                timeout=40,
+                timeout=60,
                 text=True
             )
+        except subprocess.TimeoutExpired:
+            return JsonResponse({"error": "PDF generation timeout"}, status=500)
         except Exception as e:
-            return JsonResponse({"error": "PDF generation failed", "details": str(e)})
+            return JsonResponse({"error": str(e)}, status=500)
 
-        # Check if file generated
         if not os.path.exists(local_pdf):
-            # Try to read .log file
+
             log_path = os.path.join(tmp, "resume.log")
+            log_text = ""
             if os.path.exists(log_path):
-                with open(log_path, "r", encoding="utf-8", errors="ignore") as logf:
-                    log_data = logf.read()
-            else:
-                log_data = "No log generated."
+                with open(log_path, "r", errors="ignore") as lf:
+                    log_text = lf.read()
 
             return JsonResponse({
-                "error": "PDF generation failed",
+                "error": "pdflatex failed",
                 "stdout": result.stdout,
                 "stderr": result.stderr,
-                "latex_error_log": log_data
-            })
+                "log": log_text,
+            }, status=500)
 
-        # SUCCESS — send file
-        return FileResponse(open(local_pdf, "rb"), content_type="application/pdf")
+        # *** FIX: READ PDF INTO MEMORY BEFORE TEMP FOLDER DELETES ***
+        import io
+        with open(local_pdf, "rb") as f:
+            pdf_bytes = f.read()
+
+        return FileResponse(
+            io.BytesIO(pdf_bytes),
+            content_type="application/pdf",
+            as_attachment=True,
+            filename="resume.pdf"
+        )
