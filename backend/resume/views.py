@@ -31,113 +31,341 @@ def generate_pdf(request):
 
 
 
+import os
+import json
+import uuid
+import time
+import subprocess
+import tempfile
+from datetime import datetime
+
+from django.conf import settings
+from django.http import JsonResponse, HttpResponse, FileResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_http_methods
+
+from pymongo import MongoClient
+import requests
+
+
+# ============================================================
+#  MongoDB Setup
+# ============================================================
+
+client = MongoClient(settings.MONGO_URI)
+db = client[settings.MONGO_DB_NAME]
+users = db["users"]
+
+
+# ============================================================
+#  Gemini Model Info
+# ============================================================
 
 MODEL_NAME = "gemini-2.5-flash-preview-09-2025"
 
 
-# ------------------------------
-# Gemini API Helper
-# ------------------------------
+# ============================================================
+#  Gemini Helpers
+# ============================================================
+
 def call_gemini(api_key, payload):
+    """Send request to Gemini with retry."""
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent?key={api_key}"
     headers = {"Content-Type": "application/json"}
 
-    for attempt in range(3):  # retry logic
+    for attempt in range(3):
         try:
-            res = requests.post(url, headers=headers, json=payload)
+            res = requests.post(url, headers=headers, json=payload, timeout=60)
             res.raise_for_status()
             return res.json()
-        except requests.exceptions.RequestException as e:
+        except Exception:
             if attempt == 2:
-                raise e
-            time.sleep(2 ** attempt)
+                raise
+            time.sleep(1.5 ** attempt)
 
 
-# ------------------------------
-# Extract pure text from Gemini
-# ------------------------------
-def extract_text(api_response):
+def extract_text(resp):
+    """Extract final pure text from Gemini LLM response."""
     try:
-        return api_response["candidates"][0]["content"]["parts"][0]["text"]
+        return resp["candidates"][0]["content"]["parts"][0]["text"]
     except:
         return ""
 
 
-# =============================================================
-#               MAIN VIEW: AI LaTeX Resume Builder
-# =============================================================
+# ============================================================
+# 1) RESUME GENERATION
+# POST /user/resume/generate/
+# ============================================================
+
 @csrf_exempt
 @require_http_methods(["POST"])
-def generate_resume_latex(request):
+def resume_generate(request):
 
-    required_fields = ["jd", "template", "resume_json", "gemini_api_key"]
+    email = request.session.get("email")
+    if not email:
+        return JsonResponse({"error": "Not logged in"}, status=401)
 
+    user = users.find_one({"email": email})
+    if not user:
+        return JsonResponse({"error": "User not found"}, status=404)
+
+    gemini_key = user.get("gemini_key")
+    profile_data = user.get("profile_data", {})
+
+    if not gemini_key:
+        return JsonResponse({"error": "Gemini key missing"}, status=400)
+
+    # -------------------- Parse Body --------------------
     try:
-        data = json.loads(request.body)
+        body = json.loads(request.body)
     except:
-        return JsonResponse({"error": "Invalid JSON body."}, status=400)
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
 
-    # Check required fields
-    for f in required_fields:
-        if f not in data:
-            return JsonResponse({"error": f"Missing field: {f}"}, status=400)
+    template = body.get("template")
+    jd = body.get("job_description")
 
-    jd = data["jd"]
-    template = data["template"]
-    resume_json = data["resume_json"]
-    api_key = data["gemini_api_key"]
+    if not template or not jd:
+        return JsonResponse({"error": "Missing template or job_description"}, status=400)
 
-    # --------------------------
-    # Build prompt
-    # --------------------------
+    # -------------------- LLM Prompt --------------------
     system_prompt = (
-        "You are an expert resume writer and LaTeX specialist. "
-        "You take a resume JSON, deeply understand the user's skills & experience, "
-        "and rewrite + optimize the content to match the job description. "
-        "You strictly follow the provided LaTeX template, filling in sections accurately. "
-        "DO NOT modify formatting commands, DO NOT add new packages. "
-        "Return ONLY pure LaTeX code ready for compilation."
+        "You are a senior resume writer & LaTeX engineer. "
+        "Using the template, generate a ONE-PAGE ATS optimized LaTeX resume. "
+        "STRICT RULES:\n"
+        "- Output ONLY LaTeX.\n"
+        "- Do NOT modify template structure or LaTeX commands.\n"
+        "- Use profile_data exactly.\n"
+        "- Align text with the JD.\n"
+        "- Do not invent skills.\n"
+        "- End with: % ATS_SCORE: 85"
     )
 
     user_prompt = f"""
 Job Description:
-----------------
 {jd}
 
-Resume JSON:
-------------
-{json.dumps(resume_json, indent=2)}
+User Profile JSON:
+{json.dumps(profile_data, indent=2)}
 
 LaTeX Template:
----------------
 {template}
 
-Task:
------
-1. Rewrite + optimize resume text to perfectly match the job description.
-2. Maintain ATS-optimized, measurable bullet points.
-3. Fill the provided LaTeX template **with the rewritten content**.
-4. DO NOT escape LaTeX commands already in the template.
-5. Output ONLY pure LaTeX code, nothing else.
+Follow the rules and output only LaTeX.
 """
 
     payload = {
         "systemInstruction": {"parts": [{"text": system_prompt}]},
-        "contents": [{"parts": [{"text": user_prompt}]}],
+        "contents": [{"parts": [{"text": user_prompt}]}]
     }
 
-    # --------------------------
-    # Call LLM
-    # --------------------------
+    # -------------------- LLM Call --------------------
     try:
-        raw = call_gemini(api_key, payload)
-        latex_code = extract_text(raw)
+        raw = call_gemini(gemini_key, payload)
     except Exception as e:
-        return JsonResponse({"error": f"LLM Error: {e}"}, status=503)
+        return JsonResponse({"error": f"LLM call failed: {e}"}, status=500)
 
-    return JsonResponse({
-        "success": True,
-        "latex": latex_code
-    }, status=200)
+    latex = extract_text(raw)
+
+    # -------------------- Store in DB --------------------
+    resume_id = str(uuid.uuid4())
+    entry = {
+        "id": resume_id,
+        "latex": latex,
+        "job_description_snippet": jd[:400],
+        "generated_at": datetime.utcnow().isoformat(),
+    }
+
+    users.update_one(
+        {"email": email},
+        {"$push": {"generated_resumes": entry}}
+    )
+
+    # -------------------- Store .tex File --------------------
+    temp_folder = settings.TEMP_FOLDER
+    os.makedirs(temp_folder, exist_ok=True)
+
+    tex_path = os.path.join(temp_folder, f"{resume_id}.tex")
+    with open(tex_path, "w", encoding="utf-8") as f:
+        f.write(latex)
+
+    return JsonResponse({"success": True, "id": resume_id, "latex": latex})
 
 
+# ============================================================
+# 2) RESUME ENHANCE
+# POST /user/resume/enhance/
+# ============================================================
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def resume_enhance(request):
+
+    email = request.session.get("email")
+    if not email:
+        return JsonResponse({"error": "Not logged in"}, status=401)
+
+    user = users.find_one({"email": email})
+    if not user:
+        return JsonResponse({"error": "User not found"}, status=404)
+
+    gemini_key = user.get("gemini_key")
+
+    try:
+        body = json.loads(request.body)
+    except:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    latex_input = body.get("latex")
+    context = body.get("context")
+
+    if not latex_input or not context:
+        return JsonResponse({"error": "Missing latex or context"}, status=400)
+
+    # -------------------- Enhance Prompt --------------------
+    system_prompt = (
+        "You are an expert LaTeX resume optimizer. "
+        "Enhance the resume content using context but DO NOT modify the template structure. "
+        "Return ONLY LaTeX."
+    )
+
+    user_prompt = f"""
+Context for Enhancement:
+{context}
+
+Original LaTeX Resume:
+{latex_input}
+
+Improve wording, strengthen achievements, match the new context.
+Keep format exactly same. Output only LaTeX.
+"""
+
+    payload = {
+        "systemInstruction": {"parts": [{"text": system_prompt}]},
+        "contents": [{"parts": [{"text": user_prompt}]}]
+    }
+
+    raw = call_gemini(gemini_key, payload)
+    enhanced = extract_text(raw)
+
+    # -------------------- Store new version --------------------
+    resume_id = str(uuid.uuid4())
+    entry = {
+        "id": resume_id,
+        "latex": enhanced,
+        "generated_at": datetime.utcnow().isoformat()
+    }
+
+    users.update_one(
+        {"email": email},
+        {"$push": {"generated_resumes": entry}}
+    )
+
+    # -------------------- Save .tex --------------------
+    temp_folder = settings.TEMP_FOLDER
+    os.makedirs(temp_folder, exist_ok=True)
+
+    tex_path = os.path.join(temp_folder, f"{resume_id}.tex")
+    with open(tex_path, "w", encoding="utf-8") as f:
+        f.write(enhanced)
+
+    return JsonResponse({"success": True, "id": resume_id, "latex": enhanced})
+
+
+# ============================================================
+# 3) DOWNLOAD LATEX FILE
+# GET /user/resume/download/<id>/
+# ============================================================
+
+def resume_download(request, id):
+
+    email = request.session.get("email")
+    if not email:
+        return JsonResponse({"error": "Not logged in"}, status=401)
+
+    tex_path = os.path.join(settings.TEMP_FOLDER, f"{id}.tex")
+
+    if not os.path.exists(tex_path):
+        return JsonResponse({"error": "File not found"}, status=404)
+
+    with open(tex_path, "r", encoding="utf-8") as f:
+        latex = f.read()
+
+    response = HttpResponse(latex, content_type="text/plain")
+    response["Content-Disposition"] = f"attachment; filename={id}.tex"
+    return response
+
+
+# ============================================================
+# 4) LATEX → PDF
+# GET /user/resume/pdf/<id>/
+# ============================================================
+
+import re
+
+def clean_latex(text):
+    """Remove characters that break pdflatex."""
+    text = text.replace("\u2013", "-")  # en dash
+    text = text.replace("\u2014", "-")  # em dash
+    text = text.replace("\u00A0", " ")  # non-breaking space
+    text = re.sub(r'[^\x00-\x7F]+', ' ', text)  # remove remaining unicode
+    return text
+
+
+def resume_pdf(request, id):
+
+    email = request.session.get("email")
+    if not email:
+        return JsonResponse({"error": "Not logged in"}, status=401)
+
+    tex_path = os.path.join(settings.TEMP_FOLDER, f"{id}.tex")
+
+    if not os.path.exists(tex_path):
+        return JsonResponse({"error": "LaTeX file not found"}, status=404)
+
+    # Read & sanitize latex
+    with open(tex_path, "r", encoding="utf-8") as f:
+        latex_raw = f.read()
+
+    latex_cleaned = clean_latex(latex_raw)
+
+    with tempfile.TemporaryDirectory() as tmp:
+
+        local_tex = os.path.join(tmp, "resume.tex")
+        local_pdf = os.path.join(tmp, "resume.pdf")
+
+        # save cleaned latex
+        with open(local_tex, "w", encoding="utf-8") as f:
+            f.write(latex_cleaned)
+
+        # RUN PDFLATEX — CAPTURE LOGS
+        try:
+            result = subprocess.run(
+                ["pdflatex", "-interaction=nonstopmode", "resume.tex"],
+                cwd=tmp,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=40,
+                text=True
+            )
+        except Exception as e:
+            return JsonResponse({"error": "PDF generation failed", "details": str(e)})
+
+        # Check if file generated
+        if not os.path.exists(local_pdf):
+            # Try to read .log file
+            log_path = os.path.join(tmp, "resume.log")
+            if os.path.exists(log_path):
+                with open(log_path, "r", encoding="utf-8", errors="ignore") as logf:
+                    log_data = logf.read()
+            else:
+                log_data = "No log generated."
+
+            return JsonResponse({
+                "error": "PDF generation failed",
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+                "latex_error_log": log_data
+            })
+
+        # SUCCESS — send file
+        return FileResponse(open(local_pdf, "rb"), content_type="application/pdf")

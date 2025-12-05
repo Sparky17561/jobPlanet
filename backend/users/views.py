@@ -25,7 +25,7 @@ def signup(request):
     except:
         return JsonResponse({"error": "Invalid JSON"}, status=400)
 
-    required = ["username", "email", "password"]
+    required = ["username", "email", "password", "gemini_key"]
     for f in required:
         if f not in data:
             return JsonResponse({"error": f"Missing field: {f}"}, status=400)
@@ -42,7 +42,8 @@ def signup(request):
         "username": data["username"],
         "email": data["email"],
         "password": hashed_password,
-        "profile_data": {},  # empty nested JSON
+        "gemini_key": data["gemini_key"],
+        "profile_data": {}
     }
 
     users_collection.insert_one(doc)
@@ -85,7 +86,7 @@ def login(request):
 
 
 # ============================================================
-# 3) FETCH PROFILE API
+# 3) FETCH PROFILE DATA API
 # ============================================================
 @csrf_exempt
 @require_http_methods(["GET"])
@@ -101,7 +102,8 @@ def fetch_profile(request):
     return JsonResponse({
         "success": True,
         "username": user["username"],
-        "email": user["email"],    # fixed, cannot change
+        "email": user["email"],
+        "gemini_key": user.get("gemini_key", None),
         "profile_data": user.get("profile_data", {})
     })
 
@@ -130,3 +132,31 @@ def update_profile_data(request):
     )
 
     return JsonResponse({"success": True, "message": "Profile updated"})
+
+
+# ============================================================
+# 5) UPDATE GEMINI KEY API
+# ============================================================
+@csrf_exempt
+@require_http_methods(["POST"])
+def update_gemini_key(request):
+    email = request.session.get("email")
+    if not email:
+        return JsonResponse({"error": "Not logged in"}, status=401)
+
+    try:
+        data = json.loads(request.body)
+    except:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    if "gemini_key" not in data:
+        return JsonResponse({"error": "Missing gemini_key"}, status=400)
+
+    users_collection.update_one(
+        {"email": email},
+        {"$set": {"gemini_key": data["gemini_key"]}}
+    )
+
+    return JsonResponse({"success": True, "message": "Gemini key updated"})
+
+
