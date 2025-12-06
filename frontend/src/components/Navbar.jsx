@@ -59,7 +59,7 @@ const Navbar = () => {
     { name: "Fillora [Extension]", href: "/products/fillora" },
     { name: "Cold Mail Generator", href: "/products/cold-mail" },
     { name: "Resume Generator", href: "/resume-builder" },
-    { name: "Interview Prep", href: "/products/interview-prep" },
+    { name: "Prep Hub", href: "/products/prep-hub" },
   ];
 
   return (

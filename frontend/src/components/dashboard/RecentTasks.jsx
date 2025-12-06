@@ -20,7 +20,7 @@ const RecentTasks = () => {
     {
       id: 3,
       title: "Interview prep for Amazon SDE role",
-      type: "Interview Prep",
+      type: "Prep Hub",
       status: "in-progress",
       date: "1 day ago",
     },

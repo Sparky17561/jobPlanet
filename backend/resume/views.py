@@ -379,3 +379,133 @@ def resume_pdf(request, id):
             as_attachment=True,
             filename="resume.pdf"
         )
+
+
+# ============================================================
+# 5) PREP HUB - COMPANY SEARCH
+# POST /resume/prep-hub/search/
+# ============================================================
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def prep_hub_search(request):
+    """Generate all prep hub data for a company."""
+    try:
+        email = request.session.get("email")
+        if not email:
+            return JsonResponse({"error": "Not logged in"}, status=401)
+
+        user = users.find_one({"email": email})
+        if not user:
+            return JsonResponse({"error": "User not found"}, status=404)
+
+        gemini_key = user.get("gemini_key")
+        if not gemini_key:
+            return JsonResponse({"error": "Gemini API key not found. Please add it in Settings."}, status=400)
+
+        try:
+            body = json.loads(request.body)
+        except:
+            return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+        company_name = body.get("company_name")
+        if not company_name:
+            return JsonResponse({"error": "Missing company_name"}, status=400)
+
+        # Generate all data using Gemini
+        system_prompt = """You are an expert career coach and technical interview preparation specialist. 
+Generate comprehensive interview preparation data for companies. 
+Always return valid JSON format only, no markdown, no explanations."""
+
+        user_prompt = f"""Generate comprehensive interview preparation data for {company_name}.
+
+Return a JSON object with the following structure:
+
+{{
+  "interview_questions": {{
+    "technical_round_1": [
+      {{"question": "question text", "answer": "brief answer or approach"}},
+      ...
+    ],
+    "technical_round_2": [
+      {{"question": "question text", "answer": "brief answer or approach"}},
+      ...
+    ],
+    "hr_round": [
+      {{"question": "question text", "answer": "brief answer or approach"}},
+      ...
+    ]
+  }},
+  "preparation_roadmap": {{
+    "weeks": [
+      {{
+        "week_number": 1,
+        "foundations": "description of what to build this week",
+        "time_commitment_per_day": "X hours",
+        "topics": ["topic1", "topic2", ...]
+      }},
+      ...
+    ]
+  }},
+  "leetcode_problems": [
+    {{
+      "id": 1,
+      "problem_name": "Problem Name",
+      "difficulty": "Easy/Medium/Hard",
+      "frequency": "High/Medium/Low",
+      "url": "https://leetcode.com/problems/problem-slug/"
+    }},
+    ...
+  ],
+  "tech_stack": {{
+    "required_skills": ["skill1", "skill2", ...],
+    "preferred_skills": ["skill1", "skill2", ...],
+    "frameworks": ["framework1", "framework2", ...],
+    "databases": ["db1", "db2", ...]
+  }}
+}}
+
+Generate realistic data based on {company_name}'s typical interview process and tech stack.
+Include at least 5 questions per round, 4-6 weeks of roadmap, 10-15 leetcode problems, and comprehensive tech stack.
+For LeetCode problems, provide actual LeetCode problem URLs in the format: https://leetcode.com/problems/problem-slug/
+Return ONLY the JSON object, no markdown formatting."""
+
+        payload = {
+            "systemInstruction": {"parts": [{"text": system_prompt}]},
+            "contents": [{"parts": [{"text": user_prompt}]}]
+        }
+
+        try:
+            raw = call_gemini(gemini_key, payload)
+            response_text = extract_text(raw)
+            
+            # Clean the response - remove markdown code blocks if present
+            response_text = response_text.strip()
+            if response_text.startswith("```json"):
+                response_text = response_text[7:]
+            if response_text.startswith("```"):
+                response_text = response_text[3:]
+            if response_text.endswith("```"):
+                response_text = response_text[:-3]
+            response_text = response_text.strip()
+            
+            # Parse JSON
+            data = json.loads(response_text)
+            
+            return JsonResponse({
+                "success": True,
+                "company_name": company_name,
+                "data": data
+            })
+        except json.JSONDecodeError as e:
+            return JsonResponse({
+                "error": f"Failed to parse AI response as JSON: {str(e)}",
+                "raw_response": response_text[:500] if 'response_text' in locals() else "No response"
+            }, status=500)
+        except Exception as e:
+            return JsonResponse({"error": f"Gemini API error: {str(e)}"}, status=500)
+    except Exception as e:
+        import traceback
+        print(f"Prep hub search error: {e}")
+        print(traceback.format_exc())
+        return JsonResponse({"error": f"Internal server error: {str(e)}"}, status=500)

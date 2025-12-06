@@ -16,12 +16,15 @@ const DashboardSidebar = () => {
     { name: "Dashboard", icon: LayoutDashboard, path: "/dashboard" },
     { name: "Resume Builder", icon: FileText, path: "/resume-builder" },
     { name: "Cold Reply Generator", icon: Mail, path: "/products/cold-mail" },
-    { name: "Interview Prep", icon: MessageSquare, path: "/products/interview-prep" },
+    { name: "Prep Hub", icon: MessageSquare, path: "/products/prep-hub" },
   ];
 
   const isActive = (path) => {
     if (path === "/products/cold-mail") {
       return location.pathname === "/products/cold-mail";
+    }
+    if (path === "/products/prep-hub") {
+      return location.pathname === "/products/prep-hub";
     }
     return location.pathname === path;
   };

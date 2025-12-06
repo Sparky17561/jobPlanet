@@ -15,6 +15,7 @@ import ProfileUpdate from "./pages/ProfileUpdate";
 import ResumeBuilder1 from "./pages/ResumeBuilder1";
 import Dashboard from "./pages/Dashboard";
 import ColdReplyGenerator from "./pages/ColdReplyGenerator";
+import PrepHub from "./pages/PrepHub";
 import Profile from "./pages/Profile";
 import Settings from "./pages/Settings";
 import "./index.css";
@@ -45,6 +46,7 @@ const AppContent = () => {
     location.pathname === "/dashboard" ||
     location.pathname === "/resume-builder" ||
     location.pathname === "/products/cold-mail" ||
+    location.pathname === "/products/prep-hub" ||
     location.pathname === "/profile" ||
     location.pathname === "/profile/update" ||
     location.pathname === "/settings";
@@ -114,8 +116,12 @@ const AppContent = () => {
           element={<ProductPage productName="Fillora [Extension]" />}
         />
         <Route
-          path="/products/interview-prep"
-          element={<ProductPage productName="Interview Prep" />}
+          path="/products/prep-hub"
+          element={
+            <ProtectedRoute>
+              <PrepHub />
+            </ProtectedRoute>
+          }
         />
       </Routes>
     </div>

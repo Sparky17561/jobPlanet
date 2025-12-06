@@ -7,5 +7,5 @@ urlpatterns = [
     path("enhance/", views.resume_enhance),
     path("download/<str:id>/", views.resume_download),
     path("pdf/<str:id>/", views.resume_pdf),
-
+    path("prep-hub/search/", views.prep_hub_search, name="prep-hub-search"),
 ]
