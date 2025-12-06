@@ -1,11 +1,13 @@
 import React, { useState } from "react";
 import DashboardHeader from "../components/dashboard/DashboardHeader";
 import DashboardSidebar from "../components/dashboard/DashboardSidebar";
-import { Mail, FileText, Loader2, Copy, Check } from "lucide-react";
+import { useAuth } from "../contexts/AuthContext";
+import { Mail, FileText, Loader2, Copy, Check, MessageSquare } from "lucide-react";
 import "./Dashboard.css";
 
 const ColdReplyGenerator = () => {
-  const [activeTab, setActiveTab] = useState("email"); // "email" or "reply"
+  const { geminiKey } = useAuth();
+  const [activeTab, setActiveTab] = useState("email"); // "email", "cover-letter", or "cold-dm"
   const [isLoading, setIsLoading] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -14,15 +16,22 @@ const ColdReplyGenerator = () => {
     job_description: "",
     company_name: "",
     tone: "professional",
-    gemini_api_key: "",
     resume_file: null,
   });
 
-  // Reply Generation State
-  const [replyForm, setReplyForm] = useState({
+  // Cover Letter Generation State
+  const [coverLetterForm, setCoverLetterForm] = useState({
     job_description: "",
     company_name: "",
-    gemini_api_key: "",
+    resume_file: null,
+  });
+
+  // Cold DM Generation State
+  const [coldDmForm, setColdDmForm] = useState({
+    job_description: "",
+    company_name: "",
+    platform: "linkedin",
+    character_limit: "300",
     resume_file: null,
   });
 
@@ -33,8 +42,13 @@ const ColdReplyGenerator = () => {
     sources: [],
   });
 
-  const [replyOutput, setReplyOutput] = useState({
+  const [coverLetterOutput, setCoverLetterOutput] = useState({
     cover_letter: "",
+    sources: [],
+  });
+
+  const [coldDmOutput, setColdDmOutput] = useState({
+    message: "",
     sources: [],
   });
 
@@ -43,9 +57,14 @@ const ColdReplyGenerator = () => {
     setEmailForm((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleReplyInputChange = (e) => {
+  const handleCoverLetterInputChange = (e) => {
     const { name, value } = e.target;
-    setReplyForm((prev) => ({ ...prev, [name]: value }));
+    setCoverLetterForm((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleColdDmInputChange = (e) => {
+    const { name, value } = e.target;
+    setColdDmForm((prev) => ({ ...prev, [name]: value }));
   };
 
   const handleFileChange = (e, type) => {
@@ -53,14 +72,22 @@ const ColdReplyGenerator = () => {
     if (file) {
       if (type === "email") {
         setEmailForm((prev) => ({ ...prev, resume_file: file }));
-      } else {
-        setReplyForm((prev) => ({ ...prev, resume_file: file }));
+      } else if (type === "cover-letter") {
+        setCoverLetterForm((prev) => ({ ...prev, resume_file: file }));
+      } else if (type === "cold-dm") {
+        setColdDmForm((prev) => ({ ...prev, resume_file: file }));
       }
     }
   };
 
   const handleEmailGenerate = async (e) => {
     e.preventDefault();
+    
+    if (!geminiKey) {
+      alert("Please add your Gemini API key in Settings first.");
+      return;
+    }
+
     setIsLoading(true);
     setEmailOutput({ subject: "", body: "", sources: [] });
 
@@ -68,12 +95,12 @@ const ColdReplyGenerator = () => {
     formData.append("job_description", emailForm.job_description);
     formData.append("company_name", emailForm.company_name);
     formData.append("tone", emailForm.tone);
-    formData.append("gemini_api_key", emailForm.gemini_api_key);
     formData.append("resume_file", emailForm.resume_file);
 
     try {
       const response = await fetch("http://localhost:8000/coldconnect/cold-mail/", {
         method: "POST",
+        credentials: "include",
         body: formData,
       });
 
@@ -90,42 +117,91 @@ const ColdReplyGenerator = () => {
       }
     } catch (error) {
       console.error("Error:", error);
-      alert("An error occurred. Please check your API key and try again.");
+      alert("An error occurred. Please try again.");
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleReplyGenerate = async (e) => {
+  const handleCoverLetterGenerate = async (e) => {
     e.preventDefault();
+    
+    if (!geminiKey) {
+      alert("Please add your Gemini API key in Settings first.");
+      return;
+    }
+
     setIsLoading(true);
-    setReplyOutput({ cover_letter: "", sources: [] });
+    setCoverLetterOutput({ cover_letter: "", sources: [] });
 
     const formData = new FormData();
-    formData.append("job_description", replyForm.job_description);
-    formData.append("company_name", replyForm.company_name);
-    formData.append("gemini_api_key", replyForm.gemini_api_key);
-    formData.append("resume_file", replyForm.resume_file);
+    formData.append("job_description", coverLetterForm.job_description);
+    formData.append("company_name", coverLetterForm.company_name);
+    formData.append("resume_file", coverLetterForm.resume_file);
 
     try {
       const response = await fetch("http://localhost:8000/coldconnect/cover-letter/", {
         method: "POST",
+        credentials: "include",
         body: formData,
       });
 
       const data = await response.json();
 
       if (data.success) {
-        setReplyOutput({
+        setCoverLetterOutput({
           cover_letter: data.cover_letter || "",
           sources: data.sources || [],
         });
       } else {
-        alert(data.error || "Failed to generate reply");
+        alert(data.error || "Failed to generate cover letter");
       }
     } catch (error) {
       console.error("Error:", error);
-      alert("An error occurred. Please check your API key and try again.");
+      alert("An error occurred. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleColdDmGenerate = async (e) => {
+    e.preventDefault();
+    
+    if (!geminiKey) {
+      alert("Please add your Gemini API key in Settings first.");
+      return;
+    }
+
+    setIsLoading(true);
+    setColdDmOutput({ message: "", sources: [] });
+
+    const formData = new FormData();
+    formData.append("job_description", coldDmForm.job_description);
+    formData.append("company_name", coldDmForm.company_name);
+    formData.append("platform", coldDmForm.platform);
+    formData.append("character_limit", coldDmForm.character_limit);
+    formData.append("resume_file", coldDmForm.resume_file);
+
+    try {
+      const response = await fetch("http://localhost:8000/coldconnect/cold-dm/", {
+        method: "POST",
+        credentials: "include",
+        body: formData,
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setColdDmOutput({
+          message: data.message || "",
+          sources: data.sources || [],
+        });
+      } else {
+        alert(data.error || "Failed to generate cold DM");
+      }
+    } catch (error) {
+      console.error("Error:", error);
+      alert("An error occurred. Please try again.");
     } finally {
       setIsLoading(false);
     }
@@ -154,11 +230,18 @@ const ColdReplyGenerator = () => {
                 <span>Email Generation</span>
               </button>
               <button
-                onClick={() => setActiveTab("reply")}
-                className={`cold-reply-tab ${activeTab === "reply" ? "active" : ""}`}
+                onClick={() => setActiveTab("cover-letter")}
+                className={`cold-reply-tab ${activeTab === "cover-letter" ? "active" : ""}`}
               >
                 <FileText className="w-5 h-5" />
-                <span>Reply Generation</span>
+                <span>Cover Letter Generator</span>
+              </button>
+              <button
+                onClick={() => setActiveTab("cold-dm")}
+                className={`cold-reply-tab ${activeTab === "cold-dm" ? "active" : ""}`}
+              >
+                <MessageSquare className="w-5 h-5" />
+                <span>Cold DM Generator</span>
               </button>
             </div>
 
@@ -241,25 +324,17 @@ const ColdReplyGenerator = () => {
                       </div>
                     </div>
 
-                    <div className="form-group">
-                      <label htmlFor="email-api-key" className="form-label">
-                        Gemini API Key *
-                      </label>
-                      <input
-                        type="password"
-                        id="email-api-key"
-                        name="gemini_api_key"
-                        value={emailForm.gemini_api_key}
-                        onChange={handleEmailInputChange}
-                        placeholder="Enter your Gemini API key"
-                        className="form-input"
-                        required
-                      />
-                    </div>
+                    {!geminiKey && (
+                      <div className="form-group">
+                        <div className="form-hint" style={{ color: "#fca5a5", padding: "12px", background: "rgba(239, 68, 68, 0.1)", borderRadius: "8px", border: "1px solid rgba(239, 68, 68, 0.3)" }}>
+                          ⚠️ Please add your Gemini API key in Settings to use this feature.
+                        </div>
+                      </div>
+                    )}
 
                     <button
                       type="submit"
-                      disabled={isLoading}
+                      disabled={isLoading || !geminiKey}
                       className="form-submit-btn"
                     >
                       {isLoading ? (
@@ -348,22 +423,22 @@ const ColdReplyGenerator = () => {
               </div>
             )}
 
-            {/* Reply Generation Tab */}
-            {activeTab === "reply" && (
+            {/* Cover Letter Generation Tab */}
+            {activeTab === "cover-letter" && (
               <div className="cold-reply-form-container">
-                <form onSubmit={handleReplyGenerate} className="cold-reply-form">
+                <form onSubmit={handleCoverLetterGenerate} className="cold-reply-form">
                   <div className="form-section">
-                    <h2 className="form-section-title">Generate Cover Letter Reply</h2>
+                    <h2 className="form-section-title">Generate Cover Letter</h2>
                     
                     <div className="form-group">
-                      <label htmlFor="reply-job-description" className="form-label">
+                      <label htmlFor="cover-letter-job-description" className="form-label">
                         Job Description *
                       </label>
                       <textarea
-                        id="reply-job-description"
+                        id="cover-letter-job-description"
                         name="job_description"
-                        value={replyForm.job_description}
-                        onChange={handleReplyInputChange}
+                        value={coverLetterForm.job_description}
+                        onChange={handleCoverLetterInputChange}
                         placeholder="e.g., Software Engineer, Product Manager..."
                         className="form-textarea"
                         required
@@ -372,15 +447,15 @@ const ColdReplyGenerator = () => {
                     </div>
 
                     <div className="form-group">
-                      <label htmlFor="reply-company-name" className="form-label">
+                      <label htmlFor="cover-letter-company-name" className="form-label">
                         Company Name *
                       </label>
                       <input
                         type="text"
-                        id="reply-company-name"
+                        id="cover-letter-company-name"
                         name="company_name"
-                        value={replyForm.company_name}
-                        onChange={handleReplyInputChange}
+                        value={coverLetterForm.company_name}
+                        onChange={handleCoverLetterInputChange}
                         placeholder="e.g., Google, Microsoft..."
                         className="form-input"
                         required
@@ -388,45 +463,37 @@ const ColdReplyGenerator = () => {
                     </div>
 
                     <div className="form-group">
-                      <label htmlFor="reply-resume" className="form-label">
+                      <label htmlFor="cover-letter-resume" className="form-label">
                         Resume (PDF) *
                       </label>
                       <div className="file-upload-wrapper">
                         <input
                           type="file"
-                          id="reply-resume"
+                          id="cover-letter-resume"
                           accept=".pdf"
-                          onChange={(e) => handleFileChange(e, "reply")}
+                          onChange={(e) => handleFileChange(e, "cover-letter")}
                           className="file-input"
                           required
                         />
-                        <label htmlFor="reply-resume" className="file-upload-label">
-                          {replyForm.resume_file
-                            ? replyForm.resume_file.name
+                        <label htmlFor="cover-letter-resume" className="file-upload-label">
+                          {coverLetterForm.resume_file
+                            ? coverLetterForm.resume_file.name
                             : "Choose PDF file"}
                         </label>
                       </div>
                     </div>
 
-                    <div className="form-group">
-                      <label htmlFor="reply-api-key" className="form-label">
-                        Gemini API Key *
-                      </label>
-                      <input
-                        type="password"
-                        id="reply-api-key"
-                        name="gemini_api_key"
-                        value={replyForm.gemini_api_key}
-                        onChange={handleReplyInputChange}
-                        placeholder="Enter your Gemini API key"
-                        className="form-input"
-                        required
-                      />
-                    </div>
+                    {!geminiKey && (
+                      <div className="form-group">
+                        <div className="form-hint" style={{ color: "#fca5a5", padding: "12px", background: "rgba(239, 68, 68, 0.1)", borderRadius: "8px", border: "1px solid rgba(239, 68, 68, 0.3)" }}>
+                          ⚠️ Please add your Gemini API key in Settings to use this feature.
+                        </div>
+                      </div>
+                    )}
 
                     <button
                       type="submit"
-                      disabled={isLoading}
+                      disabled={isLoading || !geminiKey}
                       className="form-submit-btn"
                     >
                       {isLoading ? (
@@ -445,13 +512,13 @@ const ColdReplyGenerator = () => {
                 </form>
 
                 {/* Output Section */}
-                {(replyOutput.cover_letter || isLoading) && (
+                {(coverLetterOutput.cover_letter || isLoading) && (
                   <div className="output-section">
                     <div className="output-header">
                       <h3 className="output-title">Generated Cover Letter</h3>
-                      {replyOutput.cover_letter && (
+                      {coverLetterOutput.cover_letter && (
                         <button
-                          onClick={() => copyToClipboard(replyOutput.cover_letter)}
+                          onClick={() => copyToClipboard(coverLetterOutput.cover_letter)}
                           className="copy-btn"
                         >
                           {copied ? (
@@ -471,13 +538,13 @@ const ColdReplyGenerator = () => {
                       </div>
                     ) : (
                       <div className="output-content">
-                        {replyOutput.cover_letter && (
+                        {coverLetterOutput.cover_letter && (
                           <div className="output-field">
                             <div className="output-value cover-letter-body">
-                              {replyOutput.cover_letter.split("\n").map((line, idx) => (
+                              {coverLetterOutput.cover_letter.split("\n").map((line, idx) => (
                                 <React.Fragment key={idx}>
                                   {line}
-                                  {idx < replyOutput.cover_letter.split("\n").length - 1 && (
+                                  {idx < coverLetterOutput.cover_letter.split("\n").length - 1 && (
                                     <br />
                                   )}
                                 </React.Fragment>
@@ -485,11 +552,198 @@ const ColdReplyGenerator = () => {
                             </div>
                           </div>
                         )}
-                        {replyOutput.sources && replyOutput.sources.length > 0 && (
+                        {coverLetterOutput.sources && coverLetterOutput.sources.length > 0 && (
                           <div className="output-sources">
                             <label className="output-label">Sources:</label>
                             <ul className="sources-list">
-                              {replyOutput.sources.map((source, idx) => (
+                              {coverLetterOutput.sources.map((source, idx) => (
+                                <li key={idx} className="source-item">
+                                  {source}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Cold DM Generation Tab */}
+            {activeTab === "cold-dm" && (
+              <div className="cold-reply-form-container">
+                <form onSubmit={handleColdDmGenerate} className="cold-reply-form">
+                  <div className="form-section">
+                    <h2 className="form-section-title">Generate Cold DM</h2>
+                    
+                    <div className="form-group">
+                      <label htmlFor="cold-dm-job-description" className="form-label">
+                        Job Description *
+                      </label>
+                      <textarea
+                        id="cold-dm-job-description"
+                        name="job_description"
+                        value={coldDmForm.job_description}
+                        onChange={handleColdDmInputChange}
+                        placeholder="e.g., Software Engineer, Product Manager..."
+                        className="form-textarea"
+                        required
+                        rows={3}
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label htmlFor="cold-dm-company-name" className="form-label">
+                        Company Name *
+                      </label>
+                      <input
+                        type="text"
+                        id="cold-dm-company-name"
+                        name="company_name"
+                        value={coldDmForm.company_name}
+                        onChange={handleColdDmInputChange}
+                        placeholder="e.g., Google, Microsoft..."
+                        className="form-input"
+                        required
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label htmlFor="cold-dm-platform" className="form-label">
+                        Platform *
+                      </label>
+                      <select
+                        id="cold-dm-platform"
+                        name="platform"
+                        value={coldDmForm.platform}
+                        onChange={handleColdDmInputChange}
+                        className="form-input"
+                        required
+                      >
+                        <option value="linkedin">LinkedIn</option>
+                        <option value="whatsapp">WhatsApp</option>
+                        <option value="twitter">Twitter/X</option>
+                        <option value="instagram">Instagram</option>
+                        <option value="other">Other</option>
+                      </select>
+                    </div>
+
+                    <div className="form-group">
+                      <label htmlFor="cold-dm-character-limit" className="form-label">
+                        Character Limit *
+                      </label>
+                      <input
+                        type="number"
+                        id="cold-dm-character-limit"
+                        name="character_limit"
+                        value={coldDmForm.character_limit}
+                        onChange={handleColdDmInputChange}
+                        placeholder="e.g., 300"
+                        className="form-input"
+                        required
+                        min="50"
+                        max="2000"
+                      />
+                      <div className="form-hint">Recommended: 300 for LinkedIn, 500 for WhatsApp</div>
+                    </div>
+
+                    <div className="form-group">
+                      <label htmlFor="cold-dm-resume" className="form-label">
+                        Resume (PDF) *
+                      </label>
+                      <div className="file-upload-wrapper">
+                        <input
+                          type="file"
+                          id="cold-dm-resume"
+                          accept=".pdf"
+                          onChange={(e) => handleFileChange(e, "cold-dm")}
+                          className="file-input"
+                          required
+                        />
+                        <label htmlFor="cold-dm-resume" className="file-upload-label">
+                          {coldDmForm.resume_file
+                            ? coldDmForm.resume_file.name
+                            : "Choose PDF file"}
+                        </label>
+                      </div>
+                    </div>
+
+                    {!geminiKey && (
+                      <div className="form-group">
+                        <div className="form-hint" style={{ color: "#fca5a5", padding: "12px", background: "rgba(239, 68, 68, 0.1)", borderRadius: "8px", border: "1px solid rgba(239, 68, 68, 0.3)" }}>
+                          ⚠️ Please add your Gemini API key in Settings to use this feature.
+                        </div>
+                      </div>
+                    )}
+
+                    <button
+                      type="submit"
+                      disabled={isLoading || !geminiKey}
+                      className="form-submit-btn"
+                    >
+                      {isLoading ? (
+                        <>
+                          <Loader2 className="w-5 h-5 animate-spin" />
+                          <span>Generating...</span>
+                        </>
+                      ) : (
+                        <>
+                          <MessageSquare className="w-5 h-5" />
+                          <span>Generate Cold DM</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+
+                {/* Output Section */}
+                {(coldDmOutput.message || isLoading) && (
+                  <div className="output-section">
+                    <div className="output-header">
+                      <h3 className="output-title">Generated Cold DM</h3>
+                      {coldDmOutput.message && (
+                        <button
+                          onClick={() => copyToClipboard(coldDmOutput.message)}
+                          className="copy-btn"
+                        >
+                          {copied ? (
+                            <Check className="w-4 h-4" />
+                          ) : (
+                            <Copy className="w-4 h-4" />
+                          )}
+                          {copied ? "Copied!" : "Copy"}
+                        </button>
+                      )}
+                    </div>
+
+                    {isLoading ? (
+                      <div className="loading-container">
+                        <Loader2 className="w-8 h-8 animate-spin text-white/60" />
+                        <p className="loading-text">Generating your cold DM...</p>
+                      </div>
+                    ) : (
+                      <div className="output-content">
+                        {coldDmOutput.message && (
+                          <div className="output-field">
+                            <div className="output-value cover-letter-body">
+                              {coldDmOutput.message.split("\n").map((line, idx) => (
+                                <React.Fragment key={idx}>
+                                  {line}
+                                  {idx < coldDmOutput.message.split("\n").length - 1 && (
+                                    <br />
+                                  )}
+                                </React.Fragment>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {coldDmOutput.sources && coldDmOutput.sources.length > 0 && (
+                          <div className="output-sources">
+                            <label className="output-label">Sources:</label>
+                            <ul className="sources-list">
+                              {coldDmOutput.sources.map((source, idx) => (
                                 <li key={idx} className="source-item">
                                   {source}
                                 </li>

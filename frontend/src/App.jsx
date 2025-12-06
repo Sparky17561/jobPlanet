@@ -50,7 +50,11 @@ const AppContent = () => {
     location.pathname === "/settings";
 
   return (
-    <div className="min-h-screen bg-black">
+    <div
+      className={`min-h-screen bg-black ${
+        location.pathname === "/profile/update" ? "overflow-y-auto" : ""
+      }`}
+    >
       {!isHomePage && !isDashboardPage && <Navbar />}
       <Routes>
         <Route path="/" element={<Home />} />
